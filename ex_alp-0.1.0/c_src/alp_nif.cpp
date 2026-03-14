@@ -316,15 +316,6 @@ nif_alp_encode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     unsigned list_len;
     if (!enif_get_list_length(env, argv[0], &list_len)) return enif_make_badarg(env);
 
-    // Empty list — return minimal header
-    if (list_len == 0) {
-        uint8_t empty[] = {'A', 'L', 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        ERL_NIF_TERM bin;
-        uint8_t* buf = enif_make_new_binary(env, sizeof(empty), &bin);
-        memcpy(buf, empty, sizeof(empty));
-        return enif_make_tuple2(env, enif_make_atom(env, "ok"), bin);
-    }
-
     std::vector<int64_t> timestamps(list_len);
     std::vector<double> values(list_len);
 
