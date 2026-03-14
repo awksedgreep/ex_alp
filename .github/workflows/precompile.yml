@@ -1,0 +1,74 @@
+name: Precompile NIF
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            arch: aarch64-apple-darwin
+            runner: macos-14
+            nif: "2.17"
+          - os: linux
+            arch: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            nif: "2.17"
+          - os: linux
+            arch: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            nif: "2.17"
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compilation tools (ARM Linux)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+
+      - run: mix deps.get
+
+      - name: Build NIF (native)
+        if: ${{ !matrix.cross }}
+        run: mix compile
+
+      - name: Build NIF (cross-compile ARM Linux)
+        if: matrix.cross
+        env:
+          CXX: aarch64-linux-gnu-g++
+          CC: aarch64-linux-gnu-gcc
+        run: |
+          mkdir -p priv
+          $CXX -O3 -std=c++17 -fPIC -shared \
+            -I$(erl -noshell -eval 'io:format("~s/erts-~s/include", [code:root_dir(), erlang:system_info(version)])' -s init stop) \
+            -Ic_src \
+            -o priv/alp_nif.so \
+            c_src/alp_nif.cpp \
+            -shared
+
+      - name: Package
+        run: |
+          tar czf ex_alp-nif-${{ matrix.nif }}-${{ matrix.arch }}.tar.gz -C priv alp_nif.so
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ex_alp-nif-*.tar.gz
