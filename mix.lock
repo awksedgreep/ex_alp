@@ -1,0 +1,7 @@
+%{
+  "cc_precompiler": {:hex, :cc_precompiler, "0.1.11", "8c844d0b9fb98a3edea067f94f616b3f6b29b959b6b3bf25fee94ffe34364768", [:mix], [{:elixir_make, "~> 0.7", [hex: :elixir_make, repo: "hexpm", optional: false]}], "hexpm", "3427232caf0835f94680e5bcf082408a70b48ad68a5f5c0b02a3bea9f3a075b9"},
+  "elixir_make": {:hex, :elixir_make, "0.9.0", "6484b3cd8c0cee58f09f05ecaf1a140a8c97670671a6a0e7ab4dc326c3109726", [:mix], [], "hexpm", "db23d4fd8b757462ad02f8aa73431a426fe6671c80b200d9710caf3d1dd0ffdb"},
+  "ex_openzl": {:hex, :ex_openzl, "0.4.6", "2937669fb7e0a8adf0594f5b094e630cdb3a116635daf5caa91df11aaf7baa34", [:make, :mix], [{:cc_precompiler, "~> 0.1", [hex: :cc_precompiler, repo: "hexpm", optional: false]}, {:elixir_make, "~> 0.9", [hex: :elixir_make, repo: "hexpm", optional: false]}, {:fine, "~> 0.1.0", [hex: :fine, repo: "hexpm", optional: false]}], "hexpm", "3306afc7576af1e598c7a9f6b0e4f9f6aa5b802a210e725a08f2a56df6085ebe"},
+  "ezstd": {:hex, :ezstd, "1.2.3", "98748f4099e6e2a067f77ace43041ebaa53c13194b08ce22370e4c93079e9e16", [:rebar3], [], "hexpm", "de32e0b41ba36a9ed46db8215da74777d2f141bb75f67bfc05dbb4b7c3386dee"},
+  "fine": {:hex, :fine, "0.1.4", "b19a89c1476c7c57afb5f9314aed5960b5bc95d5277de4cb5ee8e1d1616ce379", [:mix], [], "hexpm", "be3324cc454a42d80951cf6023b9954e9ff27c6daa255483b3e8d608670303f5"},
+}
