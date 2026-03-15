@@ -120,11 +120,15 @@ static bool alp_encode_values(const std::vector<double>& values,
     alp::state<double> stt;
     stt.vector_size = alp::config::VECTOR_SIZE;
 
-    // Sample to find best exponent/factor
-    size_t sample_n = std::min(n, static_cast<size_t>(alp::config::VECTOR_SIZE));
-    stt.sampled_values_n = sample_n;
-
-    std::vector<double> sample(values.begin(), values.begin() + sample_n);
+    // Sample to find best exponent/factor — use up to 8K values spread across input
+    size_t max_sample = std::min(n, static_cast<size_t>(8192));
+    size_t stride = std::max(n / max_sample, static_cast<size_t>(1));
+    std::vector<double> sample;
+    sample.reserve(max_sample);
+    for (size_t i = 0; i < n && sample.size() < max_sample; i += stride) {
+        sample.push_back(values[i]);
+    }
+    stt.sampled_values_n = sample.size();
     alp::encoder<double>::find_top_k_combinations(sample.data(), stt);
 
     if (stt.best_k_combinations.empty()) {
@@ -161,9 +165,10 @@ static bool alp_encode_values(const std::vector<double>& values,
         }
 
         int64_t enc = alp::encoder<double>::encode_value(v, stt.fac, stt.exp);
-        double decoded = alp::decoder<double>::decode_value(enc, stt.fac, stt.exp);
+        volatile double decoded = alp::decoder<double>::decode_value(enc, stt.fac, stt.exp);
+        volatile double original = v;
 
-        if (decoded != v) {
+        if (decoded != original) {
             exception_positions.push_back(static_cast<uint32_t>(i));
             exceptions.push_back(v);
             encoded[i] = enc;
