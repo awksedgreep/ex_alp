@@ -18,6 +18,8 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <climits>
+#include <cfloat>
 
 // ALP headers
 #include "alp/config.hpp"
@@ -92,7 +94,7 @@ static bool decode_timestamp_deltas(const uint8_t* data, size_t len, size_t& pos
         // Varint decode
         uint64_t zigzag = 0;
         int shift = 0;
-        while (pos < len) {
+        while (pos < len && shift < 64) {
             uint8_t byte = data[pos++];
             zigzag |= static_cast<uint64_t>(byte & 0x7F) << shift;
             if ((byte & 0x80) == 0) break;
@@ -143,18 +145,28 @@ static bool alp_encode_values(const std::vector<double>& values,
 
     // Encode values
     std::vector<int64_t> encoded(n);
-    std::vector<uint16_t> exception_positions;
+    std::vector<uint32_t> exception_positions;
     std::vector<double> exceptions;
 
     for (size_t i = 0; i < n; i++) {
-        int64_t enc = alp::encoder<double>::encode_value(values[i], stt.fac, stt.exp);
+        // Guard against double-to-int64 overflow (UB on ARM)
+        double v = values[i];
+        if (std::isnan(v) || std::isinf(v) ||
+            v > 9.2e18 || v < -9.2e18) {
+            // Cannot ALP-encode — store as exception
+            exception_positions.push_back(static_cast<uint32_t>(i));
+            exceptions.push_back(v);
+            encoded[i] = 0;
+            continue;
+        }
+
+        int64_t enc = alp::encoder<double>::encode_value(v, stt.fac, stt.exp);
         double decoded = alp::decoder<double>::decode_value(enc, stt.fac, stt.exp);
 
-        if (decoded != values[i]) {
-            // Exception — store exact value
-            exception_positions.push_back(static_cast<uint16_t>(i));
-            exceptions.push_back(values[i]);
-            encoded[i] = enc; // placeholder
+        if (decoded != v) {
+            exception_positions.push_back(static_cast<uint32_t>(i));
+            exceptions.push_back(v);
+            encoded[i] = enc;
         } else {
             encoded[i] = enc;
         }
@@ -178,14 +190,15 @@ static bool alp_encode_values(const std::vector<double>& values,
     }
 
     // Bit-pack encoded values (frame-of-reference)
-    if (bit_width > 0) {
+    if (bit_width > 0 && bit_width < 64) {
         // Pack values into bytes
         uint64_t buffer = 0;
         int bits_in_buffer = 0;
+        uint64_t mask = (1ULL << bit_width) - 1;
 
         for (size_t i = 0; i < n; i++) {
             uint64_t delta = static_cast<uint64_t>(encoded[i] - min_val);
-            buffer = (buffer << bit_width) | (delta & ((1ULL << bit_width) - 1));
+            buffer = (buffer << bit_width) | (delta & mask);
             bits_in_buffer += bit_width;
 
             while (bits_in_buffer >= 8) {
@@ -198,17 +211,30 @@ static bool alp_encode_values(const std::vector<double>& values,
         if (bits_in_buffer > 0) {
             out.push_back(static_cast<uint8_t>((buffer << (8 - bits_in_buffer)) & 0xFF));
         }
+    } else if (bit_width >= 64) {
+        // Full 8 bytes per value — no bit-packing possible
+        for (size_t i = 0; i < n; i++) {
+            uint64_t delta = static_cast<uint64_t>(encoded[i] - min_val);
+            for (int b = 7; b >= 0; b--) {
+                out.push_back(static_cast<uint8_t>((delta >> (b * 8)) & 0xFF));
+            }
+        }
     }
 
-    // Write exceptions
-    uint16_t exc_count = static_cast<uint16_t>(exceptions.size());
+    // Write exceptions (4-byte count, 4-byte positions)
+    uint32_t exc_count = static_cast<uint32_t>(exceptions.size());
+    out.push_back(static_cast<uint8_t>((exc_count >> 24) & 0xFF));
+    out.push_back(static_cast<uint8_t>((exc_count >> 16) & 0xFF));
     out.push_back(static_cast<uint8_t>((exc_count >> 8) & 0xFF));
     out.push_back(static_cast<uint8_t>(exc_count & 0xFF));
 
     for (size_t i = 0; i < exc_count; i++) {
-        // Position
-        out.push_back(static_cast<uint8_t>((exception_positions[i] >> 8) & 0xFF));
-        out.push_back(static_cast<uint8_t>(exception_positions[i] & 0xFF));
+        // Position (4 bytes)
+        uint32_t p = exception_positions[i];
+        out.push_back(static_cast<uint8_t>((p >> 24) & 0xFF));
+        out.push_back(static_cast<uint8_t>((p >> 16) & 0xFF));
+        out.push_back(static_cast<uint8_t>((p >> 8) & 0xFF));
+        out.push_back(static_cast<uint8_t>(p & 0xFF));
 
         // Exact double value
         uint64_t bits;
@@ -257,9 +283,10 @@ static bool alp_decode_values(const uint8_t* data, size_t len, size_t& pos,
 
     // Bit-unpack
     std::vector<int64_t> encoded(count);
-    if (bit_width > 0) {
+    if (bit_width > 0 && bit_width < 64) {
         uint64_t buffer = 0;
         int bits_in_buffer = 0;
+        uint64_t mask = (1ULL << bit_width) - 1;
 
         for (size_t i = 0; i < count; i++) {
             while (bits_in_buffer < bit_width && pos < len) {
@@ -267,7 +294,16 @@ static bool alp_decode_values(const uint8_t* data, size_t len, size_t& pos,
                 bits_in_buffer += 8;
             }
             bits_in_buffer -= bit_width;
-            uint64_t delta = (buffer >> bits_in_buffer) & ((1ULL << bit_width) - 1);
+            uint64_t delta = (buffer >> bits_in_buffer) & mask;
+            encoded[i] = min_val + static_cast<int64_t>(delta);
+        }
+    } else if (bit_width >= 64) {
+        for (size_t i = 0; i < count; i++) {
+            if (pos + 8 > len) return false;
+            uint64_t delta = 0;
+            for (int b = 7; b >= 0; b--) {
+                delta |= static_cast<uint64_t>(data[pos++]) << (b * 8);
+            }
             encoded[i] = min_val + static_cast<int64_t>(delta);
         }
     } else {
@@ -281,15 +317,21 @@ static bool alp_decode_values(const uint8_t* data, size_t len, size_t& pos,
         values[i] = alp::decoder<double>::decode_value(encoded[i], fac, exp);
     }
 
-    // Read and apply exceptions
-    if (pos + 2 > len) return false;
-    uint16_t exc_count = (static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1];
-    pos += 2;
+    // Read and apply exceptions (4-byte count, 4-byte positions)
+    if (pos + 4 > len) return false;
+    uint32_t exc_count = (static_cast<uint32_t>(data[pos]) << 24) |
+                         (static_cast<uint32_t>(data[pos+1]) << 16) |
+                         (static_cast<uint32_t>(data[pos+2]) << 8) |
+                         static_cast<uint32_t>(data[pos+3]);
+    pos += 4;
 
     for (size_t i = 0; i < exc_count; i++) {
-        if (pos + 10 > len) return false;
-        uint16_t exc_pos = (static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1];
-        pos += 2;
+        if (pos + 12 > len) return false;
+        uint32_t exc_pos = (static_cast<uint32_t>(data[pos]) << 24) |
+                           (static_cast<uint32_t>(data[pos+1]) << 16) |
+                           (static_cast<uint32_t>(data[pos+2]) << 8) |
+                           static_cast<uint32_t>(data[pos+3]);
+        pos += 4;
 
         uint64_t bits = 0;
         for (int b = 7; b >= 0; b--) {
@@ -310,6 +352,7 @@ static bool alp_decode_values(const uint8_t* data, size_t len, size_t& pos,
 
 static ERL_NIF_TERM
 nif_alp_encode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+  try {
     if (argc != 1) return enif_make_badarg(env);
 
     // Parse list of {timestamp, value} tuples
@@ -383,10 +426,20 @@ nif_alp_encode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     memcpy(buf, out.data(), out.size());
 
     return enif_make_tuple2(env, enif_make_atom(env, "ok"), bin);
+  } catch (const std::exception& e) {
+    return enif_make_tuple2(env,
+        enif_make_atom(env, "error"),
+        enif_make_string(env, e.what(), ERL_NIF_LATIN1));
+  } catch (...) {
+    return enif_make_tuple2(env,
+        enif_make_atom(env, "error"),
+        enif_make_string(env, "unknown C++ exception", ERL_NIF_LATIN1));
+  }
 }
 
 static ERL_NIF_TERM
 nif_alp_decode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+  try {
     if (argc != 1) return enif_make_badarg(env);
 
     ErlNifBinary bin;
@@ -406,12 +459,17 @@ nif_alp_decode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     }
     pos = 3;
 
-    // Point count
+    // Point count — sanity check to prevent huge allocations
     uint32_t count = (static_cast<uint32_t>(data[pos]) << 24) |
                      (static_cast<uint32_t>(data[pos+1]) << 16) |
                      (static_cast<uint32_t>(data[pos+2]) << 8) |
                      static_cast<uint32_t>(data[pos+3]);
     pos += 4;
+
+    if (count > 100000000) {  // 100M points max per decode call
+        return enif_make_tuple2(env, enif_make_atom(env, "error"),
+            enif_make_string(env, "count exceeds maximum", ERL_NIF_LATIN1));
+    }
 
     // First timestamp
     int64_t first_ts = 0;
@@ -443,6 +501,15 @@ nif_alp_decode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     }
 
     return enif_make_tuple2(env, enif_make_atom(env, "ok"), list);
+  } catch (const std::exception& e) {
+    return enif_make_tuple2(env,
+        enif_make_atom(env, "error"),
+        enif_make_string(env, e.what(), ERL_NIF_LATIN1));
+  } catch (...) {
+    return enif_make_tuple2(env,
+        enif_make_atom(env, "error"),
+        enif_make_string(env, "unknown C++ exception", ERL_NIF_LATIN1));
+  }
 }
 
 // --- NIF registration ---
