@@ -165,10 +165,11 @@ static bool alp_encode_values(const std::vector<double>& values,
         }
 
         int64_t enc = alp::encoder<double>::encode_value(v, stt.fac, stt.exp);
-        volatile double decoded = alp::decoder<double>::decode_value(enc, stt.fac, stt.exp);
-        volatile double original = v;
+        double decoded = alp::decoder<double>::decode_value(enc, stt.fac, stt.exp);
 
-        if (decoded != original) {
+        // Bit-exact comparison — memcmp catches FP rounding differences
+        // that == may miss due to compiler optimizations
+        if (memcmp(&decoded, &v, sizeof(double)) != 0) {
             exception_positions.push_back(static_cast<uint32_t>(i));
             exceptions.push_back(v);
             encoded[i] = enc;
