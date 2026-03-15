@@ -78,14 +78,26 @@ struct encoder {
 	}
 
 	//! Scalar encoding a single value with ALP
+	//! Uses bit manipulation instead of static_cast<int64_t> to avoid
+	//! platform-dependent UB (ARM fcvtzs vs x86 cvttsd2si).
 	template <bool SAFE = true>
 	static ST encode_value(const PT value, const factor_idx_t factor_idx, const exponent_idx_t exponent_idx) {
 		PT tmp_encoded_value = value * Constants<PT>::EXP_ARR[exponent_idx] * Constants<PT>::FRAC_ARR[factor_idx];
 		if constexpr (SAFE) {
 			if (is_impossible_to_encode(tmp_encoded_value)) { return ENCODING_UPPER_LIMIT; }
 		}
-		tmp_encoded_value = tmp_encoded_value + Constants<PT>::MAGIC_NUMBER - Constants<PT>::MAGIC_NUMBER;
-		return static_cast<ST>(tmp_encoded_value);
+		// Add magic number to round to integer — the integer value is now
+		// in the low 52 bits of the double. Extract via bit manipulation
+		// instead of subtract + static_cast which is platform-dependent.
+		PT with_magic = tmp_encoded_value + Constants<PT>::MAGIC_NUMBER;
+		int64_t result;
+		memcpy(&result, &with_magic, sizeof(result));
+		// The low 52 bits contain the integer value, with the magic number's
+		// exponent/sign in the high bits. Subtract the magic as integer.
+		int64_t magic_int;
+		memcpy(&magic_int, &Constants<PT>::MAGIC_NUMBER, sizeof(magic_int));
+		result -= magic_int;
+		return static_cast<ST>(result);
 	}
 
 	template <typename UT>
