@@ -24,17 +24,13 @@ defmodule ExAlpTest do
     assert bytes_per_point < 4.0
   end
 
-  @tag :skip
   test "empty list" do
-    # TODO: fix segfault on empty list edge case
     {:ok, blob} = ExAlp.compress([])
     {:ok, decoded} = ExAlp.decompress(blob)
     assert decoded == []
   end
 
-  @tag :skip
   test "single point" do
-    # TODO: fix NIF edge case for single-point encoding
     points = [{1_700_000_000, 42.5}]
     {:ok, blob} = ExAlp.compress(points)
     {:ok, decoded} = ExAlp.decompress(blob)

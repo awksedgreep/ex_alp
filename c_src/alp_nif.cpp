@@ -77,6 +77,7 @@ static bool decode_timestamp_deltas(const uint8_t* data, size_t len, size_t& pos
                                      int64_t first_ts, size_t count,
                                      std::vector<int64_t>& timestamps) {
     timestamps.resize(count);
+    if (count == 0) return true;
     timestamps[0] = first_ts;
     if (count == 1) return true;
 
@@ -116,6 +117,17 @@ static bool alp_encode_values(const std::vector<double>& values,
                                std::vector<uint8_t>& out) {
     size_t n = values.size();
     if (n == 0) return true;
+
+    // Single value — store raw (ALP sampling needs >= 2 values)
+    if (n == 1) {
+        out.push_back(0xFF); // raw mode marker
+        uint64_t bits;
+        memcpy(&bits, &values[0], 8);
+        for (int b = 7; b >= 0; b--) {
+            out.push_back(static_cast<uint8_t>((bits >> (b * 8)) & 0xFF));
+        }
+        return true;
+    }
 
     alp::state<double> stt;
     stt.vector_size = alp::config::VECTOR_SIZE;
