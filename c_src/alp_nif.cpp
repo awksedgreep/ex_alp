@@ -400,7 +400,11 @@ nif_alp_encode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
         ErlNifSInt64 ts;
         double val;
         if (!enif_get_int64(env, tuple[0], &ts)) return enif_make_badarg(env);
-        if (!enif_get_double(env, tuple[1], &val)) return enif_make_badarg(env);
+        if (!enif_get_double(env, tuple[1], &val)) {
+            ErlNifSInt64 ival;
+            if (!enif_get_int64(env, tuple[1], &ival)) return enif_make_badarg(env);
+            val = static_cast<double>(ival);
+        }
 
         timestamps[i] = ts;
         values[i] = val;
