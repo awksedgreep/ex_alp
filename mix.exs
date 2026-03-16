@@ -22,6 +22,12 @@ defmodule ExAlp.MixProject do
         %{"ERTS_INCLUDE_DIR" => erts_include_dir}
       end,
       make_clean: ["clean"],
+      make_precompiler: {:nif, CCPrecompiler},
+      make_precompiler_url:
+        "https://github.com/awksedgreep/ex_alp/releases/download/v#{@version}/@{artefact_filename}",
+      make_precompiler_filename: "alp_nif",
+      make_precompiler_priv_paths: ["alp_nif.*"],
+      make_precompiler_nif_versions: [versions: ["2.17"]],
       description: description(),
       package: package(),
       docs: docs(),
@@ -49,7 +55,7 @@ defmodule ExAlp.MixProject do
       links: %{
         "GitHub" => @source_url
       },
-      files: ~w(lib c_src Makefile mix.exs README.md LICENSE),
+      files: ~w(lib c_src Makefile mix.exs README.md LICENSE checksum.exs),
       maintainers: ["Mark Cotner"]
     ]
   end
@@ -66,6 +72,7 @@ defmodule ExAlp.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.9", runtime: false},
+      {:cc_precompiler, "~> 0.1", runtime: false},
       {:ezstd, "~> 1.2", optional: true},
       {:ex_openzl, "~> 0.4", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
