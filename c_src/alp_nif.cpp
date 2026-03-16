@@ -533,8 +533,8 @@ nif_alp_decode(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
 // --- NIF registration ---
 
 static ErlNifFunc nif_funcs[] = {
-    {"nif_encode", 1, nif_alp_encode, ERL_NIF_DIRTY_JOB_CPU_BOUND},
-    {"nif_decode", 1, nif_alp_decode, ERL_NIF_DIRTY_JOB_CPU_BOUND}
+    {"nif_encode", 1, nif_alp_encode, 0},
+    {"nif_decode", 1, nif_alp_decode, 0}
 };
 
 static int load(ErlNifEnv*, void**, ERL_NIF_TERM) { return 0; }
